@@ -1,17 +1,54 @@
-// In-memory user storage
-let users = [];
-let nextId = 1;
+const fs = require('fs');
+const path = require('path');
+
+const DATA_FILE = path.join(__dirname, 'users.json');
+
+// --- Helper Functions for File Operations ---
+
+const loadUsers = () => {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const dataBuffer = fs.readFileSync(DATA_FILE);
+      const dataJSON = dataBuffer.toString();
+      if (dataJSON) {
+        const usersFromFile = JSON.parse(dataJSON);
+        // Determine nextId based on existing users
+        const maxId = usersFromFile.reduce((max, user) => (user.id > max ? user.id : max), 0);
+        return { users: usersFromFile, nextId: maxId + 1 };
+      }
+    }
+  } catch (error) {
+    console.error('Error loading users from file:', error);
+    // If file is corrupted or unreadable, start fresh
+  }
+  return { users: [], nextId: 1 }; // Default if file doesn't exist or is empty/corrupt
+};
+
+const saveUsers = (users) => {
+  try {
+    const dataJSON = JSON.stringify(users, null, 2); // Pretty print JSON
+    fs.writeFileSync(DATA_FILE, dataJSON);
+  } catch (error) {
+    console.error('Error saving users to file:', error);
+    throw new Error('Could not save user data.'); // Propagate error
+  }
+};
+
+// Initialize users and nextId from file
+let { users, nextId } = loadUsers();
 
 // Helper function to find user by email - internal use
 const findUserByEmailInternal = (email) => users.find(user => user.email === email);
 
-// --- Database Interaction Functions ---
+// --- Database Interaction Functions (Modified for File Persistence) ---
 
 const getAllUsers = () => {
+  // Data is already loaded in 'users' variable
   return users;
 };
 
 const getUserById = (id) => {
+  // Data is already loaded
   return users.find(u => u.id === id);
 };
 
@@ -29,12 +66,13 @@ const createUser = (userData) => {
   }
 
   const newUser = {
-    id: nextId++,
+    id: nextId++, // Use and then increment nextId
     nombre,
     email,
     edad
   };
   users.push(newUser);
+  saveUsers(users); // Save to file
   return newUser;
 };
 
@@ -45,7 +83,7 @@ const updateUser = (id, updateData) => {
     return null; // Indicate user not found
   }
 
-  const userToUpdate = users[userIndex];
+  const userToUpdate = { ...users[userIndex] }; // Create a copy to modify
   const { nombre, email, edad } = updateData;
 
   // Basic validation for update
@@ -59,23 +97,35 @@ const updateUser = (id, updateData) => {
   }
 
   // Update user data selectively
-  if (nombre !== undefined) {
+  let changed = false;
+  if (nombre !== undefined && userToUpdate.nombre !== nombre) {
     userToUpdate.nombre = nombre;
+    changed = true;
   }
-  if (email !== undefined) {
+  if (email !== undefined && userToUpdate.email !== email) {
     userToUpdate.email = email;
+    changed = true;
   }
-  if (edad !== undefined) {
+  if (edad !== undefined && userToUpdate.edad !== edad) {
     userToUpdate.edad = edad;
+    changed = true;
   }
 
-  return userToUpdate; // Return the updated user object
+  if (changed) {
+    users[userIndex] = userToUpdate;
+    saveUsers(users); // Save to file
+  }
+  return userToUpdate;
 };
 
 const deleteUser = (id) => {
   const initialLength = users.length;
   users = users.filter(u => u.id !== id);
-  return users.length < initialLength; // Return true if deleted, false if not found
+  const deleted = users.length < initialLength;
+  if (deleted) {
+    saveUsers(users); // Save to file
+  }
+  return deleted; // Return true if deleted, false if not found
 };
 
 module.exports = {
